@@ -46,10 +46,9 @@ interface SupplierField {
 
 interface Message {
   id: string
-  type: "user" | "assistant" | "results"
+  type: string
   content: string
   timestamp: Date
-  suppliers?: Supplier[]
 }
 
 interface Supplier {
@@ -61,14 +60,14 @@ interface Supplier {
 interface Chat {
   id: string
   title: string
-  lastMessage: string
-  timestamp: Date
+  messages: Message[]
 }
 
 interface UserType {
   name: string
   email: string
   avatar?: string
+  uid: string
 }
 
 const mockSuppliers: Supplier[] = [
@@ -154,6 +153,7 @@ export default function SupplyGenieApp() {
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const [search, setSearch] = useState("")
 
   const handleViewChange = (newView: "landing" | "login" | "signup" | "chat") => {
     setIsAnimating(true)
@@ -168,7 +168,7 @@ export default function SupplyGenieApp() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, loginEmail, loginPassword)
       const user = userCredential.user
-      setUser({ name: user.displayName || user.email || "User", email: user.email || "" })
+      setUser({ name: user.displayName || user.email || "User", email: user.email || "", uid: user.uid })
       handleViewChange("chat")
     } catch (error: any) {
       setLoginError(error.message || "Login failed")
@@ -180,43 +180,88 @@ export default function SupplyGenieApp() {
     handleViewChange("landing")
   }
 
-  const handleSendMessage = () => {
-    if (!currentMessage.trim()) return
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      type: "user",
+  const handleSendMessage = async () => {
+    if (!currentMessage.trim() || !activeChat || !user) return;
+    const chat = chats.find(c => c.id === activeChat);
+    if (!chat) return;
+    const userMessage = {
+      id: `${activeChat}_${Date.now()}`,
+      type: 'user',
       content: currentMessage,
       timestamp: new Date(),
-    }
-
-    setMessages((prev) => [...prev, userMessage])
-
-    // Simulate AI response with supplier results
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "results",
-        content: `I found ${mockSuppliers.length} suppliers that match your criteria. Here are the top results:`,
+    };
+    // Optimistically update UI
+    setChats(prev => prev.map(chat =>
+      chat.id === activeChat ? { ...chat, messages: [...chat.messages, userMessage] } : chat
+    ));
+    setMessages(prev => [...prev, userMessage]);
+    setCurrentMessage("");
+    // Save user message to DB
+    await fetch('/api/chats', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: user.uid,
+        chat_id: activeChat,
+        message: {
+          order: (chat.messages.length + 1),
+          sender: 'user',
+          message: currentMessage,
+        },
+      }),
+    });
+    // Simulate assistant response
+    setTimeout(async () => {
+      const assistantMessage = {
+        id: `${activeChat}_${Date.now()}_a`,
+        type: 'assistant',
+        content: "This is a simulated assistant reply.",
         timestamp: new Date(),
-        suppliers: mockSuppliers,
-      }
-      setMessages((prev) => [...prev, assistantMessage])
-    }, 1000)
-
-    setCurrentMessage("")
+      };
+      setChats(prev => prev.map(chat =>
+        chat.id === activeChat ? { ...chat, messages: [...chat.messages, assistantMessage] } : chat
+      ));
+      setMessages(prev => [...prev, assistantMessage]);
+      // Save assistant message to DB
+      await fetch('/api/chats', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.uid,
+          chat_id: activeChat,
+          message: {
+            order: (chat.messages.length + 2),
+            sender: 'bot',
+            message: assistantMessage.content,
+          },
+        }),
+      });
+    }, 1000);
   }
 
-  const createNewChat = () => {
-    const newChat: Chat = {
-      id: Date.now().toString(),
-      title: "New Supplier Search",
-      lastMessage: "Start your search...",
-      timestamp: new Date(),
+  const createNewChat = async () => {
+    if (!user) return;
+    const chatName = "New Supplier Search";
+    // Create chat in DB
+    const res = await fetch('/api/chats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: user.uid,
+        chat_name: chatName,
+      }),
+    });
+    const data = await res.json();
+    if (data.chat) {
+      const newChat: Chat = {
+        id: data.chat.chat_id,
+        title: data.chat.chat_name,
+        messages: [],
+      };
+      setChats((prev) => [newChat, ...prev]);
+      setActiveChat(newChat.id);
+      setMessages([]);
     }
-    setChats((prev) => [newChat, ...prev])
-    setActiveChat(newChat.id)
-    setMessages([])
   }
 
   const renderFieldValue = (field: SupplierField) => {
@@ -267,7 +312,7 @@ export default function SupplyGenieApp() {
       if (signupName) {
         await updateProfile(user, { displayName: signupName })
       }
-      setUser({ name: signupName || user.email || "User", email: user.email || "" })
+      setUser({ name: signupName || user.email || "User", email: user.email || "", uid: user.uid })
       handleViewChange("chat")
     } catch (error: any) {
       setSignupError(error.message || "Signup failed")
@@ -280,6 +325,7 @@ export default function SupplyGenieApp() {
         setUser({
           name: firebaseUser.displayName || firebaseUser.email || "User",
           email: firebaseUser.email || "",
+          uid: firebaseUser.uid,
         })
       } else {
         setUser(null)
@@ -303,14 +349,27 @@ export default function SupplyGenieApp() {
     setRenameValue(e.target.value)
   }
 
-  const handleRenameSave = (chatId: string) => {
+  const handleRenameSave = async (chatId: string) => {
+    const newName = renameValue.trim();
     setChats((prev) =>
       prev.map((chat) =>
-        chat.id === chatId ? { ...chat, title: renameValue.trim() || chat.title } : chat
+        chat.id === chatId ? { ...chat, title: newName || chat.title } : chat
       )
-    )
-    setRenamingChatId(null)
-    setRenameValue("")
+    );
+    setRenamingChatId(null);
+    setRenameValue("");
+    // Update in DB
+    if (user && newName) {
+      await fetch('/api/chats', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.uid,
+          chat_id: chatId,
+          new_chat_name: newName,
+        }),
+      });
+    }
   }
 
   const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, chatId: string) => {
@@ -324,20 +383,33 @@ export default function SupplyGenieApp() {
 
   useEffect(() => {
     if (user) {
-      fetch("/api/chats")
+      fetch(`/api/chats?user_id=${user.uid}`)
         .then(res => res.json())
         .then(data => {
+          // The backend returns: { chats: [ { chat_id, chat_name, messages: [ { order, sender, message } ] } ] }
           if (data.chats) {
             setChats(data.chats.map((chat: any) => ({
-              id: chat._id,
-              title: chat.title,
-              lastMessage: chat.lastMessage,
-              timestamp: new Date(chat.timestamp),
+              id: chat.chat_id,
+              title: chat.chat_name,
+              messages: (chat.messages || []).map((m: any) => ({
+                id: `${chat.chat_id}_${m.order}`,
+                type: m.sender === 'user' ? 'user' : (m.sender === 'bot' ? 'assistant' : m.sender),
+                content: m.message,
+                timestamp: new Date(), // Placeholder; replace with real timestamp if available
+              }))
             })))
           }
         })
     }
   }, [user])
+
+  useEffect(() => {
+    const chat = chats.find(c => c.id === activeChat)
+    setMessages(chat ? chat.messages : [])
+  }, [activeChat, chats])
+
+  // Filter chats for display:
+  const filteredChats = chats.filter(chat => chat.title.toLowerCase().includes(search.toLowerCase()))
 
   // Landing Page
   if (currentView === "landing") {
@@ -358,7 +430,7 @@ export default function SupplyGenieApp() {
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">
-                      <Avatar className="w-8 h-8 bg-zinc-800 border border-zinc-700">
+                      <Avatar className="w-10 h-10 bg-zinc-800 border border-zinc-700">
                         <AvatarFallback className="text-xs text-white bg-zinc-800">
                           {user.name.split(" ").map((n) => n[0]).join("") || "U"}
                         </AvatarFallback>
@@ -638,227 +710,214 @@ export default function SupplyGenieApp() {
   }
 
   // Chat Interface
-  return (
-    <div
-      className={`flex h-screen bg-zinc-950 text-white transition-opacity duration-300 ${
-        isAnimating ? "opacity-0" : "opacity-100"
-      }`}
-    >
-      {/* Sidebar */}
-      <div
-        className={`${
-          sidebarOpen ? "w-80" : "w-0"
-        } transition-all duration-200 overflow-hidden border-r border-zinc-800 bg-zinc-950 flex flex-col`}
-      >
-        <div className="p-4 border-b border-zinc-800">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center">
-              <img
-                src="/logo.png"
-                alt="SupplyGenie Logo"
-                className="h-8 w-auto cursor-pointer"
-                onClick={() => handleViewChange('landing')}
-                title="Go to Home"
-              />
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">
-                  <Avatar className="w-6 h-6 bg-zinc-800 border border-zinc-700">
-                    <AvatarFallback className="text-xs text-white bg-zinc-800">
-                      {user?.name
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("") || "U"}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 bg-zinc-900 border-zinc-800">
-                <div className="px-2 py-1.5">
-                  <p className="text-sm font-medium text-white">{user?.name}</p>
-                  <p className="text-xs text-zinc-400">{user?.email}</p>
-                </div>
-                <DropdownMenuItem onClick={handleLogout} className="text-zinc-300 hover:text-white hover:bg-zinc-800">
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          <Button onClick={createNewChat} className="w-full bg-white text-black hover:bg-zinc-200">
-            <Plus className="w-4 h-4 mr-2" />
-            New chat
-          </Button>
-        </div>
-
-        <ScrollArea className="flex-1 p-3">
-          <div className="space-y-2">
-            {chats.map((chat) => (
-              <div
-                key={chat.id}
-                className={`p-3 rounded-lg cursor-pointer transition-all duration-200 group ${
-                  activeChat === chat.id ? "bg-zinc-800 border border-zinc-700" : "hover:bg-zinc-900/50"
-                }`}
-                onClick={() => setActiveChat(chat.id)}
-              >
-                <div className="flex items-start space-x-3">
-                  <MessageSquare className="w-4 h-4 text-zinc-500 mt-0.5 flex-shrink-0 group-hover:text-zinc-400" />
-                  <div className="flex-1 min-w-0">
-                    {renamingChatId === chat.id ? (
-                      <input
-                        ref={renameInputRef}
-                        value={renameValue}
-                        onChange={handleRenameChange}
-                        onBlur={() => handleRenameSave(chat.id)}
-                        onKeyDown={(e) => handleRenameKeyDown(e, chat.id)}
-                        className="font-medium text-sm truncate text-white bg-zinc-800 border border-zinc-700 rounded px-2 py-1 w-full outline-none"
-                      />
-                    ) : (
-                      <div className="flex items-center group/chat-title">
-                        <p
-                          className="font-medium text-sm truncate text-white group-hover:text-white cursor-pointer"
-                          onDoubleClick={() => handleStartRename(chat)}
-                          title="Double click to rename"
-                        >
-                          {chat.title}
-                        </p>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="ml-1 p-1 text-zinc-400 hover:text-white opacity-0 group-hover/chat-title:opacity-100"
-                          onClick={(e) => { e.stopPropagation(); handleStartRename(chat) }}
-                          tabIndex={-1}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13h3l8-8a2.828 2.828 0 10-4-4l-8 8v3zm0 0v3h3" /></svg>
-                        </Button>
-                      </div>
-                    )}
-                    <p className="text-xs text-zinc-500 truncate mt-1 group-hover:text-zinc-400">{chat.lastMessage}</p>
-                    <p className="text-xs text-zinc-600 mt-1">{chat.timestamp.toLocaleDateString()}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+  if (currentView === "chat") {
+    return (
+      <div className="flex flex-col h-screen bg-[#181C23] text-white">
         {/* Header */}
-        <div className="border-b border-zinc-800 p-4 flex items-center justify-between bg-zinc-950">
+        <header className="flex items-center justify-between px-8 py-4 bg-[#232733] border-b border-[#232733]">
           <div className="flex items-center space-x-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="text-zinc-400 hover:text-white"
+            <button
+              onClick={() => handleViewChange('landing')}
+              className="focus:outline-none"
+              aria-label="Go to home page"
+              type="button"
             >
-              {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-            </Button>
-            <h1 className="font-medium text-white">
-              {activeChat ? chats.find((c) => c.id === activeChat)?.title || "Supplier Search" : "SupplyGenie"}
-            </h1>
+              <img src="/logo.png" alt="SupplyGenie Logo" className="h-8 w-auto cursor-pointer" />
+            </button>
           </div>
-        </div>
-
-        {/* Messages */}
-        <ScrollArea className="flex-1 p-6">
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center max-w-2xl mx-auto">
-              <div className="mb-8 flex items-center justify-center">
-                <img src="/logo.png" alt="SupplyGenie Logo" className="h-16 w-auto" />
+          <div className="flex items-center space-x-4">
+            {user && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">
+                    <Avatar className="w-10 h-10 bg-zinc-800 border border-zinc-700">
+                      <AvatarFallback className="text-xs text-white bg-zinc-800">
+                        {user.name.split(" ").map((n) => n[0]).join("") || "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 bg-zinc-900 border-zinc-800">
+                  <div className="px-2 py-1.5">
+                    <p className="text-sm font-medium text-white">{user.name}</p>
+                    <p className="text-xs text-zinc-400">{user.email}</p>
+                  </div>
+                  <DropdownMenuSeparator className="bg-zinc-800" />
+                  <DropdownMenuItem onClick={handleLogout} className="text-zinc-300 hover:text-white hover:bg-zinc-800">
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        </header>
+        <div className="flex flex-1 min-h-0">
+          {/* Sidebar */}
+          <aside className="w-[340px] bg-[#20232B] border-r border-[#232733] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-5">
+              <h2 className="text-lg font-semibold">My Chats</h2>
+              <div className="flex items-center space-x-2">
+                <Button size="icon" className="bg-[#232733] rounded-full p-0 w-8 h-8 flex items-center justify-center text-white" onClick={createNewChat}>
+                  <Plus className="w-4 h-4 text-white" />
+                </Button>
               </div>
-              <h2 className="text-2xl font-medium mb-4 text-white">How can I help you today?</h2>
-              <p className="text-zinc-400 text-lg mb-8 leading-relaxed">
-                Find suppliers based on your specific requirements. I can help you search by price, location, compliance
-                standards, lead times, and much more.
-              </p>
             </div>
-          ) : (
-            <div className="space-y-8 max-w-4xl mx-auto">
-              {messages.map((message) => (
-                <div key={message.id} className="space-y-6">
-                  {message.type === "user" ? (
-                    <div className="flex justify-end">
-                      <div className="bg-white text-black rounded-2xl px-4 py-3 max-w-2xl">
-                        <p className="text-sm">{message.content}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex justify-start">
-                      <div className="flex space-x-4 max-w-full">
-                        <Avatar className="w-8 h-8 bg-zinc-800 border border-zinc-700">
-                          <AvatarFallback className="text-xs text-white bg-zinc-800">SG</AvatarFallback>
-                        </Avatar>
-                        <div className="space-y-6 flex-1">
-                          <div className="bg-zinc-900 rounded-2xl px-4 py-3 border border-zinc-800">
-                            <p className="text-sm text-white">{message.content}</p>
-                          </div>
-
-                          {message.suppliers && (
-                            <div className="space-y-4">
-                              {message.suppliers.map((supplier) => (
-                                <div
-                                  key={supplier.id}
-                                  className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-zinc-700 transition-colors"
-                                >
-                                  <div className="flex items-start justify-between mb-4">
-                                    <h3 className="font-semibold text-lg text-white">{supplier.name}</h3>
-                                    <Button size="sm" className="bg-white text-black hover:bg-zinc-200">
-                                      <ExternalLink className="w-3 h-3 mr-1" />
-                                      Contact
-                                    </Button>
-                                  </div>
-
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {supplier.fields.map((field, index) => (
-                                      <div key={index} className="space-y-1">
-                                        <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
-                                          {field.label}
-                                        </p>
-                                        <div className="text-white">{renderFieldValue(field)}</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+            {/* Tabs */}
+            <div className="flex items-center px-6 space-x-2 mb-3">
+              <Button size="sm" className="bg-[#232733] text-white rounded-full px-4 py-1 text-xs font-semibold">CHATS <span className="ml-2 bg-[#232733] rounded px-2">{chats.length}</span></Button>
+            </div>
+            {/* Search and filter */}
+            <div className="flex items-center px-6 mb-3 space-x-2">
+              <div className="flex-1 relative">
+                <input
+                  className="w-full bg-[#232733] text-white rounded-lg px-3 py-2 text-sm border-none outline-none placeholder-[#7B849B]"
+                  placeholder="Search..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+              <Button size="icon" className="bg-[#232733] rounded-lg p-0 w-8 h-8 flex items-center justify-center text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+              </Button>
+            </div>
+            {/* Chat List */}
+            <div className="flex-1 overflow-y-auto px-3 pb-4">
+              {filteredChats.map((chat) => (
+                <div
+                  key={chat.id}
+                  className={`mb-2 rounded-xl px-3 py-3 cursor-pointer transition-colors ${activeChat === chat.id ? "bg-[#232733]" : "hover:bg-[#232733]/70"}`}
+                  onClick={() => setActiveChat(chat.id)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      {renamingChatId === chat.id ? (
+                        <input
+                          ref={renameInputRef}
+                          value={renameValue}
+                          onChange={handleRenameChange}
+                          onBlur={() => handleRenameSave(chat.id)}
+                          onKeyDown={e => handleRenameKeyDown(e, chat.id)}
+                          className="font-medium text-sm truncate text-white bg-[#232733] border border-[#353A4A] rounded px-2 py-1 w-32 outline-none"
+                          autoFocus
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        <div className="flex items-center group/chat-title">
+                          <span
+                            className="font-medium text-sm truncate text-white group-hover:text-white cursor-pointer"
+                            onClick={e => { e.stopPropagation(); handleStartRename(chat); }}
+                            title="Click to rename"
+                          >
+                            {chat.title}
+                          </span>
+                          <button
+                            className="ml-1 opacity-0 group-hover/chat-title:opacity-100 text-[#7B849B] hover:text-white transition"
+                            onClick={e => { e.stopPropagation(); handleStartRename(chat); }}
+                            tabIndex={-1}
+                            title="Rename"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13h3l8-8a2.828 2.828 0 10-4-4l-8 8v3zm0 0v3h3" /></svg>
+                          </button>
                         </div>
-                      </div>
+                      )}
                     </div>
-                  )}
+                    <span className="text-xs text-[#7B849B]">{chat.messages.length} messages</span>
+                  </div>
                 </div>
               ))}
             </div>
-          )}
-        </ScrollArea>
-
-        {/* Input Area */}
-        <div className="border-t border-zinc-800 p-6 bg-zinc-950">
-          <div className="max-w-4xl mx-auto">
-            <div className="flex space-x-3">
-              <Input
-                value={currentMessage}
-                onChange={(e) => setCurrentMessage(e.target.value)}
-                placeholder="Message SupplyGenie..."
-                className="flex-1 h-12 bg-zinc-900 border-zinc-800 text-white placeholder:text-zinc-500 focus:border-zinc-600"
-                onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!currentMessage.trim()}
-                size="sm"
-                className="h-12 w-12 p-0 bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-500"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
+          </aside>
+          {/* Main Chat Area */}
+          <main className="flex-1 flex flex-col bg-[#181C23]">
+            {/* Chat Title Bar */}
+            <div className="flex items-center justify-between px-8 py-6 border-b border-[#232733]">
+              <h1 className="text-xl font-semibold">{chats.find(c => c.id === activeChat)?.title || "Select a chat"}</h1>
             </div>
-          </div>
+            {/* Messages Area */}
+            <div className="flex-1 flex flex-col px-8 py-6 overflow-y-auto">
+              {messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center text-[#7B849B]">
+                  No messages yet.
+                </div>
+              ) : (
+                messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`mb-6 flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    {message.type !== 'user' && (
+                      <div className="flex-shrink-0 mr-3 flex items-end">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center border border-[#353A4A] shadow-md">
+                          {/* Modern AI swirl icon */}
+                          <svg className="w-7 h-7" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <defs>
+                              <linearGradient id="ai-gradient" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                                <stop stopColor="#4ADE80" />
+                                <stop offset="1" stopColor="#60A5FA" />
+                              </linearGradient>
+                            </defs>
+                            <path d="M16 4a12 12 0 1 1-8.49 20.49" stroke="url(#ai-gradient)" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
+                            <path d="M16 28a12 12 0 1 1 8.49-20.49" stroke="url(#ai-gradient)" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
+                            <circle cx="16" cy="16" r="3.2" fill="url(#ai-gradient)" />
+                          </svg>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex flex-col items-end max-w-xl">
+                      <div
+                        className={`rounded-2xl px-5 py-4 text-base shadow-lg transition-colors duration-150 ${
+                          message.type === 'user'
+                            ? 'bg-gradient-to-br from-blue-700 to-blue-800 text-white self-end border border-blue-900 hover:shadow-blue-900/30'
+                            : 'bg-gradient-to-br from-[#232733] to-[#313543] text-white self-start border border-[#353A4A] hover:shadow-black/20'
+                        } hover:brightness-105`}
+                      >
+                        {message.content}
+                      </div>
+                      <span className="mt-2 text-xs text-[#7B849B] font-medium">
+                        {message.timestamp instanceof Date ? message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                      </span>
+                    </div>
+                    {message.type === 'user' && (
+                      <div className="flex-shrink-0 ml-3 flex items-end">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-700 to-blue-900 flex items-center justify-center text-white font-bold text-base border-2 border-blue-400 shadow-md">
+                          {user?.name?.split(' ').map(n => n[0]).join('') || 'U'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            {/* Input Bar */}
+            <div className="px-8 py-6 border-t border-[#232733] bg-[#20232B]">
+              <div className="flex items-center space-x-3">
+                <input
+                  className="flex-1 h-12 bg-[#232733] border-none rounded-lg px-4 text-white placeholder-[#7B849B] outline-none"
+                  placeholder="Ask questions, or type '/' for commands"
+                  value={currentMessage}
+                  onChange={e => setCurrentMessage(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSendMessage() }}
+                />
+                <Button size="icon" className="bg-[#232733] rounded-lg p-0 w-12 h-12 flex items-center justify-center text-white" onClick={handleSendMessage}>
+                  <Send className="w-5 h-5 text-white" />
+                </Button>
+              </div>
+            </div>
+          </main>
         </div>
       </div>
-    </div>
-  )
+    )
+  }
+
+  return null
+}
+
+function formatChatTimestamp(date: Date) {
+  const now = new Date()
+  const diff = now.getTime() - date.getTime()
+  if (diff < 1000 * 60 * 1) return "Now"
+  if (diff < 1000 * 60 * 60 * 24) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (diff < 1000 * 60 * 60 * 24 * 7) return date.toLocaleDateString([], { weekday: 'short' })
+  return date.toLocaleDateString([], { day: '2-digit', month: 'short' })
 }
