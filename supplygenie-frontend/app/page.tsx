@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -36,7 +36,7 @@ import {
   EyeOff,
 } from "lucide-react"
 import { auth } from "@/lib/firebase"
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from "firebase/auth"
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "firebase/auth"
 
 interface SupplierField {
   label: string
@@ -170,6 +170,9 @@ export default function SupplyGenieApp() {
   const [signupEmail, setSignupEmail] = useState("")
   const [signupPassword, setSignupPassword] = useState("")
   const [signupError, setSignupError] = useState<string | null>(null)
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
   const handleViewChange = (newView: "landing" | "login" | "signup" | "chat") => {
     setIsAnimating(true)
@@ -290,6 +293,54 @@ export default function SupplyGenieApp() {
     }
   }
 
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          name: firebaseUser.displayName || firebaseUser.email || "User",
+          email: firebaseUser.email || "",
+        })
+      } else {
+        setUser(null)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (renamingChatId && renameInputRef.current) {
+      renameInputRef.current.focus()
+    }
+  }, [renamingChatId])
+
+  const handleStartRename = (chat: Chat) => {
+    setRenamingChatId(chat.id)
+    setRenameValue(chat.title)
+  }
+
+  const handleRenameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setRenameValue(e.target.value)
+  }
+
+  const handleRenameSave = (chatId: string) => {
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === chatId ? { ...chat, title: renameValue.trim() || chat.title } : chat
+      )
+    )
+    setRenamingChatId(null)
+    setRenameValue("")
+  }
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, chatId: string) => {
+    if (e.key === "Enter") {
+      handleRenameSave(chatId)
+    } else if (e.key === "Escape") {
+      setRenamingChatId(null)
+      setRenameValue("")
+    }
+  }
+
   // Landing Page
   if (currentView === "landing") {
     return (
@@ -301,56 +352,76 @@ export default function SupplyGenieApp() {
         {/* Header */}
         <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-                <Zap className="w-4 h-4 text-black" />
-              </div>
-              <span className="font-semibold text-xl">SupplyGenie</span>
+            <div className="flex items-center">
+              <img src="/logo.png" alt="SupplyGenie Logo" className="h-10 w-auto" />
             </div>
             <div className="flex items-center space-x-4">
-              <Button
-                variant="ghost"
-                onClick={() => handleViewChange("login")}
-                className="text-zinc-300 hover:text-white"
-              >
-                Sign In
-              </Button>
-              <Button onClick={() => handleViewChange("signup")} className="bg-white text-black hover:bg-zinc-200">
-                Get Started
-              </Button>
+              {user ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">
+                      <Avatar className="w-8 h-8 bg-zinc-800 border border-zinc-700">
+                        <AvatarFallback className="text-xs text-white bg-zinc-800">
+                          {user.name.split(" ").map((n) => n[0]).join("") || "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56 bg-zinc-900 border-zinc-800">
+                    <div className="px-2 py-1.5">
+                      <p className="text-sm font-medium text-white">{user.name}</p>
+                      <p className="text-xs text-zinc-400">{user.email}</p>
+                    </div>
+                    <DropdownMenuSeparator className="bg-zinc-800" />
+                    <DropdownMenuItem onClick={handleLogout} className="text-zinc-300 hover:text-white hover:bg-zinc-800">
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Sign out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <>
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleViewChange("login")}
+                    className="text-zinc-300 hover:text-white"
+                  >
+                    Sign In
+                  </Button>
+                  <Button onClick={() => handleViewChange("signup")} className="bg-white text-black hover:bg-zinc-200">
+                    Get Started
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </header>
 
         {/* Hero Section */}
         <section className="max-w-7xl mx-auto px-6 py-20">
-          <div className="text-center space-y-8">
-            <div className="space-y-4">
-              <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
-                Find Perfect Suppliers
-              </h1>
-              <p className="text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-                AI-powered supply chain advisor that helps you discover, evaluate, and connect with suppliers based on
-                your exact requirements.
-              </p>
+          <div className="flex flex-col md:flex-row items-center gap-12 md:gap-20">
+            <div className="flex-1 space-y-8 text-center md:text-left">
+              <div className="space-y-4">
+                <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">
+                  Find Perfect Suppliers
+                </h1>
+                <p className="text-xl text-zinc-400 max-w-2xl leading-relaxed mx-auto md:mx-0">
+                  AI-powered supply chain advisor that helps you discover, evaluate, and connect with suppliers based on your exact requirements.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
+                <Button
+                  size="lg"
+                  onClick={() => handleViewChange(user ? "chat" : "signup")}
+                  className="bg-white text-black hover:bg-zinc-200 h-12 px-8"
+                >
+                  Get Started
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button
-                size="lg"
-                onClick={() => handleViewChange("signup")}
-                className="bg-white text-black hover:bg-zinc-200 h-12 px-8"
-              >
-                Start Finding Suppliers
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => handleViewChange("login")}
-                className="border-zinc-700 text-white hover:bg-zinc-900 h-12 px-8"
-              >
-                Sign In
-              </Button>
+            <div className="flex-1 flex justify-center md:justify-end mt-12 md:mt-0">
+              <img src="/home_page_image.png" alt="SupplyGenie Home" className="max-w-sm md:max-w-xl w-full rounded-2xl shadow-2xl" />
             </div>
           </div>
         </section>
@@ -388,7 +459,7 @@ export default function SupplyGenieApp() {
               </p>
               <Button
                 size="lg"
-                onClick={() => handleViewChange("signup")}
+                onClick={() => handleViewChange(user ? "chat" : "signup")}
                 className="bg-white text-black hover:bg-zinc-200 h-12 px-8"
               >
                 Get Started Free
@@ -411,8 +482,8 @@ export default function SupplyGenieApp() {
       >
         <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
           <CardHeader className="text-center space-y-4">
-            <div className="mx-auto w-12 h-12 bg-white rounded-lg flex items-center justify-center">
-              <Zap className="w-6 h-6 text-black" />
+            <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
+               <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
             </div>
             <div className="space-y-2">
               <CardTitle className="text-2xl font-medium text-white">Welcome back</CardTitle>
@@ -489,8 +560,8 @@ export default function SupplyGenieApp() {
       >
         <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
           <CardHeader className="text-center space-y-4">
-            <div className="mx-auto w-12 h-12 bg-white rounded-lg flex items-center justify-center">
-              <Zap className="w-6 h-6 text-black" />
+            <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
+               <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
             </div>
             <div className="space-y-2">
               <CardTitle className="text-2xl font-medium text-white">Create your account</CardTitle>
@@ -583,11 +654,14 @@ export default function SupplyGenieApp() {
       >
         <div className="p-4 border-b border-zinc-800">
           <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-                <Zap className="w-4 h-4 text-black" />
-              </div>
-              <span className="font-medium text-lg">SupplyGenie</span>
+            <div className="flex items-center">
+              <img
+                src="/logo.png"
+                alt="SupplyGenie Logo"
+                className="h-8 w-auto cursor-pointer"
+                onClick={() => handleViewChange('landing')}
+                title="Go to Home"
+              />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -607,11 +681,6 @@ export default function SupplyGenieApp() {
                   <p className="text-sm font-medium text-white">{user?.name}</p>
                   <p className="text-xs text-zinc-400">{user?.email}</p>
                 </div>
-                <DropdownMenuSeparator className="bg-zinc-800" />
-                <DropdownMenuItem className="text-zinc-300 hover:text-white hover:bg-zinc-800">
-                  <Settings className="w-4 h-4 mr-2" />
-                  Settings
-                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} className="text-zinc-300 hover:text-white hover:bg-zinc-800">
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign out
@@ -638,7 +707,35 @@ export default function SupplyGenieApp() {
                 <div className="flex items-start space-x-3">
                   <MessageSquare className="w-4 h-4 text-zinc-500 mt-0.5 flex-shrink-0 group-hover:text-zinc-400" />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm truncate text-white group-hover:text-white">{chat.title}</p>
+                    {renamingChatId === chat.id ? (
+                      <input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={handleRenameChange}
+                        onBlur={() => handleRenameSave(chat.id)}
+                        onKeyDown={(e) => handleRenameKeyDown(e, chat.id)}
+                        className="font-medium text-sm truncate text-white bg-zinc-800 border border-zinc-700 rounded px-2 py-1 w-full outline-none"
+                      />
+                    ) : (
+                      <div className="flex items-center group/chat-title">
+                        <p
+                          className="font-medium text-sm truncate text-white group-hover:text-white cursor-pointer"
+                          onDoubleClick={() => handleStartRename(chat)}
+                          title="Double click to rename"
+                        >
+                          {chat.title}
+                        </p>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="ml-1 p-1 text-zinc-400 hover:text-white opacity-0 group-hover/chat-title:opacity-100"
+                          onClick={(e) => { e.stopPropagation(); handleStartRename(chat) }}
+                          tabIndex={-1}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13h3l8-8a2.828 2.828 0 10-4-4l-8 8v3zm0 0v3h3" /></svg>
+                        </Button>
+                      </div>
+                    )}
                     <p className="text-xs text-zinc-500 truncate mt-1 group-hover:text-zinc-400">{chat.lastMessage}</p>
                     <p className="text-xs text-zinc-600 mt-1">{chat.timestamp.toLocaleDateString()}</p>
                   </div>
@@ -672,8 +769,8 @@ export default function SupplyGenieApp() {
         <ScrollArea className="flex-1 p-6">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center max-w-2xl mx-auto">
-              <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mb-8">
-                <Zap className="w-8 h-8 text-white" />
+              <div className="mb-8 flex items-center justify-center">
+                <img src="/logo.png" alt="SupplyGenie Logo" className="h-16 w-auto" />
               </div>
               <h2 className="text-2xl font-medium mb-4 text-white">How can I help you today?</h2>
               <p className="text-zinc-400 text-lg mb-8 leading-relaxed">
