@@ -142,26 +142,7 @@ export default function SupplyGenieApp() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [currentMessage, setCurrentMessage] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
-  const [chats, setChats] = useState<Chat[]>([
-    {
-      id: "1",
-      title: "Electronics Suppliers in Asia",
-      lastMessage: "Found 10 suppliers matching your criteria",
-      timestamp: new Date(Date.now() - 1000 * 60 * 30),
-    },
-    {
-      id: "2",
-      title: "Sustainable Packaging Options",
-      lastMessage: "What about compliance requirements?",
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    },
-    {
-      id: "3",
-      title: "Automotive Parts - Germany",
-      lastMessage: "Checking lead times for Q2 production",
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24),
-    },
-  ])
+  const [chats, setChats] = useState<Chat[]>([])
   const [activeChat, setActiveChat] = useState<string | null>(null)
   const [loginEmail, setLoginEmail] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
@@ -340,6 +321,23 @@ export default function SupplyGenieApp() {
       setRenameValue("")
     }
   }
+
+  useEffect(() => {
+    if (user) {
+      fetch("/api/chats")
+        .then(res => res.json())
+        .then(data => {
+          if (data.chats) {
+            setChats(data.chats.map((chat: any) => ({
+              id: chat._id,
+              title: chat.title,
+              lastMessage: chat.lastMessage,
+              timestamp: new Date(chat.timestamp),
+            })))
+          }
+        })
+    }
+  }, [user])
 
   // Landing Page
   if (currentView === "landing") {
