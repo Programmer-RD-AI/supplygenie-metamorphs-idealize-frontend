@@ -34,9 +34,17 @@ import {
   Lock,
   Eye,
   EyeOff,
+  Mic,
+  Filter,
+  ArrowUpDown,
+  Phone,
+  Globe,
+  Mail as MailIcon,
+  Building,
 } from "lucide-react"
 import { auth } from "@/lib/firebase"
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "firebase/auth"
+import { useSpeechToText } from "@/hooks/useSpeechToText"
 
 interface SupplierField {
   label: string
@@ -49,6 +57,7 @@ interface Message {
   type: string
   content: string
   timestamp: Date
+  suppliers?: Supplier[]
 }
 
 interface Supplier {
@@ -113,6 +122,34 @@ const mockSuppliers: Supplier[] = [
       { label: "Carbon Neutral", value: "Yes", type: "text" },
     ],
   },
+  {
+    id: "4",
+    name: "EcoSupply Solutions",
+    fields: [
+      { label: "Location", value: "Portland, USA", type: "location" },
+      { label: "Rating", value: "4.7", type: "rating" },
+      { label: "Price Range", value: "$5-30K", type: "price" },
+      { label: "Lead Time", value: "7-14 days", type: "time" },
+      { label: "Sustainability Score", value: "95/100", type: "text" },
+      { label: "Certifications", value: "FSC,Organic,Fair Trade", type: "badge" },
+      { label: "Materials", value: "Recycled,Biodegradable", type: "badge" },
+      { label: "Carbon Neutral", value: "Yes", type: "text" },
+    ],
+  },
+  {
+    id: "5",
+    name: "EcoSupply Solutions",
+    fields: [
+      { label: "Location", value: "Portland, USA", type: "location" },
+      { label: "Rating", value: "4.7", type: "rating" },
+      { label: "Price Range", value: "$5-30K", type: "price" },
+      { label: "Lead Time", value: "7-14 days", type: "time" },
+      { label: "Sustainability Score", value: "95/100", type: "text" },
+      { label: "Certifications", value: "FSC,Organic,Fair Trade", type: "badge" },
+      { label: "Materials", value: "Recycled,Biodegradable", type: "badge" },
+      { label: "Carbon Neutral", value: "Yes", type: "text" },
+    ],
+  },
 ]
 
 const features = [
@@ -154,6 +191,17 @@ export default function SupplyGenieApp() {
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState("")
+  const {
+    isSupported: isSpeechSupported,
+    isRecording,
+    transcript,
+    error: speechError,
+    startListening,
+    stopListening,
+    setTranscript,
+  } = useSpeechToText();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const handleViewChange = (newView: "landing" | "login" | "signup" | "chat") => {
     setIsAnimating(true)
@@ -215,8 +263,9 @@ export default function SupplyGenieApp() {
       const assistantMessage = {
         id: `${activeChat}_${Date.now()}_a`,
         type: 'assistant',
-        content: "This is a simulated assistant reply.",
+        content: "I found several electronics component suppliers in Asia with ISO certification that match your requirements. Here are the top matches:",
         timestamp: new Date(),
+        suppliers: mockSuppliers,
       };
       setChats(prev => prev.map(chat =>
         chat.id === activeChat ? { ...chat, messages: [...chat.messages, assistantMessage] } : chat
@@ -388,7 +437,7 @@ export default function SupplyGenieApp() {
         .then(data => {
           // The backend returns: { chats: [ { chat_id, chat_name, messages: [ { order, sender, message } ] } ] }
           if (data.chats) {
-            setChats(data.chats.map((chat: any) => ({
+            const loadedChats = data.chats.map((chat: any) => ({
               id: chat.chat_id,
               title: chat.chat_name,
               messages: (chat.messages || []).map((m: any) => ({
@@ -397,7 +446,12 @@ export default function SupplyGenieApp() {
                 content: m.message,
                 timestamp: new Date(), // Placeholder; replace with real timestamp if available
               }))
-            })))
+            }))
+            setChats(loadedChats)
+            // If no chat is active, set the first one as active
+            if (!activeChat && loadedChats.length > 0) {
+              setActiveChat(loadedChats[0].id)
+            }
           }
         })
     }
@@ -410,6 +464,36 @@ export default function SupplyGenieApp() {
 
   // Filter chats for display:
   const filteredChats = chats.filter(chat => chat.title.toLowerCase().includes(search.toLowerCase()))
+
+  // Update currentMessage when transcript changes (only if recording)
+  useEffect(() => {
+    if (isRecording) {
+      setCurrentMessage(transcript);
+    }
+  }, [transcript, isRecording]);
+
+  // Optionally clear transcript when message is sent
+  useEffect(() => {
+    if (!currentMessage && !isRecording) {
+      setTranscript("");
+    }
+  }, [currentMessage, isRecording, setTranscript]);
+
+  // When recording ends and transcript is available, set it as the message and focus input
+  useEffect(() => {
+    if (!isRecording && transcript) {
+      setCurrentMessage(transcript);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }
+  }, [isRecording, transcript]);
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, activeChat]);
 
   // Landing Page
   if (currentView === "landing") {
@@ -550,72 +634,86 @@ export default function SupplyGenieApp() {
           isAnimating ? "opacity-0" : "opacity-100"
         }`}
       >
-        <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
-          <CardHeader className="text-center space-y-4">
-            <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
-               <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
-            </div>
-            <div className="space-y-2">
-              <CardTitle className="text-2xl font-medium text-white">Welcome back</CardTitle>
-              <p className="text-sm text-zinc-400">Sign in to your SupplyGenie account</p>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                  <Input
-                    placeholder="Email"
-                    type="email"
-                    value={loginEmail}
-                    onChange={e => setLoginEmail(e.target.value)}
-                    className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
-                  />
+        <div className="w-full max-w-6xl flex items-center justify-center">
+          {/* Left side - Image */}
+          <div className="hidden lg:flex lg:w-1/2 lg:pr-8">
+            <img 
+              src="/login_page.png" 
+              alt="Login illustration" 
+              className="w-full h-auto max-h-[600px] object-contain"
+            />
+          </div>
+          
+          {/* Right side - Login Form */}
+          <div className="w-full lg:w-1/2 flex justify-center">
+            <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
+              <CardHeader className="text-center space-y-4">
+                <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
+                   <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                  <Input
-                    placeholder="Password"
-                    type={showPassword ? "text" : "password"}
-                    value={loginPassword}
-                    onChange={e => setLoginPassword(e.target.value)}
-                    className="h-11 pl-10 pr-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0 text-zinc-400 hover:text-white"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </Button>
+                <div className="space-y-2">
+                  <CardTitle className="text-2xl font-medium text-white">Welcome back</CardTitle>
+                  <p className="text-sm text-zinc-400">Sign in to your SupplyGenie account</p>
                 </div>
-              </div>
-            </div>
-            {loginError && <div className="text-red-500 text-sm text-center">{loginError}</div>}
-            <Button
-              onClick={handleLogin}
-              className="w-full h-11 bg-white text-black hover:bg-zinc-200"
-            >
-              Sign In
-            </Button>
-            <div className="text-center space-y-4">
-              <p className="text-sm text-zinc-400">
-                Don't have an account?{" "}
-                <button onClick={() => handleViewChange("signup")} className="text-white hover:underline font-medium">
-                  Sign up
-                </button>
-              </p>
-              <button onClick={() => handleViewChange("landing")} className="text-sm text-zinc-500 hover:text-zinc-400">
-                ← Back to home
-              </button>
-            </div>
-          </CardContent>
-        </Card>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                      <Input
+                        placeholder="Email"
+                        type="email"
+                        value={loginEmail}
+                        onChange={e => setLoginEmail(e.target.value)}
+                        className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                      <Input
+                        placeholder="Password"
+                        type={showPassword ? "text" : "password"}
+                        value={loginPassword}
+                        onChange={e => setLoginPassword(e.target.value)}
+                        className="h-11 pl-10 pr-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0 text-zinc-400 hover:text-white"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                {loginError && <div className="text-red-500 text-sm text-center">{loginError}</div>}
+                <Button
+                  onClick={handleLogin}
+                  className="w-full h-11 bg-white text-black hover:bg-zinc-200"
+                >
+                  Sign In
+                </Button>
+                <div className="text-center space-y-4">
+                  <p className="text-sm text-zinc-400">
+                    Don't have an account?{" "}
+                    <button onClick={() => handleViewChange("signup")} className="text-white hover:underline font-medium">
+                      Sign up
+                    </button>
+                  </p>
+                  <button onClick={() => handleViewChange("landing")} className="text-sm text-zinc-500 hover:text-zinc-400">
+                    ← Back to home
+                  </button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     )
   }
@@ -628,83 +726,97 @@ export default function SupplyGenieApp() {
           isAnimating ? "opacity-0" : "opacity-100"
         }`}
       >
-        <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
-          <CardHeader className="text-center space-y-4">
-            <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
-               <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
-            </div>
-            <div className="space-y-2">
-              <CardTitle className="text-2xl font-medium text-white">Create your account</CardTitle>
-              <p className="text-sm text-zinc-400">Start finding suppliers with SupplyGenie</p>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                  <Input
-                    placeholder="Full name"
-                    value={signupName}
-                    onChange={e => setSignupName(e.target.value)}
-                    className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
-                  />
+        <div className="w-full max-w-6xl flex items-center justify-center">
+          {/* Left side - Signup Form */}
+          <div className="w-full lg:w-1/2 flex justify-center">
+            <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
+              <CardHeader className="text-center space-y-4">
+                <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
+                   <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                  <Input
-                    placeholder="Email"
-                    type="email"
-                    value={signupEmail}
-                    onChange={e => setSignupEmail(e.target.value)}
-                    className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
-                  />
+                <div className="space-y-2">
+                  <CardTitle className="text-2xl font-medium text-white">Create your account</CardTitle>
+                  <p className="text-sm text-zinc-400">Start finding suppliers with SupplyGenie</p>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                  <Input
-                    placeholder="Password"
-                    type={showPassword ? "text" : "password"}
-                    value={signupPassword}
-                    onChange={e => setSignupPassword(e.target.value)}
-                    className="h-11 pl-10 pr-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0 text-zinc-400 hover:text-white"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </Button>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                      <Input
+                        placeholder="Full name"
+                        value={signupName}
+                        onChange={e => setSignupName(e.target.value)}
+                        className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                      <Input
+                        placeholder="Email"
+                        type="email"
+                        value={signupEmail}
+                        onChange={e => setSignupEmail(e.target.value)}
+                        className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                      <Input
+                        placeholder="Password"
+                        type={showPassword ? "text" : "password"}
+                        value={signupPassword}
+                        onChange={e => setSignupPassword(e.target.value)}
+                        className="h-11 pl-10 pr-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0 text-zinc-400 hover:text-white"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            {signupError && <div className="text-red-500 text-sm text-center">{signupError}</div>}
-            <Button
-              onClick={handleSignup}
-              className="w-full h-11 bg-white text-black hover:bg-zinc-200"
-            >
-              Create Account
-            </Button>
-            <div className="text-center space-y-4">
-              <p className="text-sm text-zinc-400">
-                Already have an account?{" "}
-                <button onClick={() => handleViewChange("login")} className="text-white hover:underline font-medium">
-                  Sign in
-                </button>
-              </p>
-              <button onClick={() => handleViewChange("landing")} className="text-sm text-zinc-500 hover:text-zinc-400">
-                ← Back to home
-              </button>
-            </div>
-          </CardContent>
-        </Card>
+                {signupError && <div className="text-red-500 text-sm text-center">{signupError}</div>}
+                <Button
+                  onClick={handleSignup}
+                  className="w-full h-11 bg-white text-black hover:bg-zinc-200"
+                >
+                  Create Account
+                </Button>
+                <div className="text-center space-y-4">
+                  <p className="text-sm text-zinc-400">
+                    Already have an account?{" "}
+                    <button onClick={() => handleViewChange("login")} className="text-white hover:underline font-medium">
+                      Sign in
+                    </button>
+                  </p>
+                  <button onClick={() => handleViewChange("landing")} className="text-sm text-zinc-500 hover:text-zinc-400">
+                    ← Back to home
+                  </button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          
+          {/* Right side - Image */}
+          <div className="hidden lg:flex lg:w-1/2 lg:pl-8">
+            <img 
+              src="/create_acc_page.png" 
+              alt="Create account illustration" 
+              className="w-full h-auto max-h-[600px] object-contain"
+            />
+          </div>
+        </div>
       </div>
     )
   }
@@ -712,9 +824,9 @@ export default function SupplyGenieApp() {
   // Chat Interface
   if (currentView === "chat") {
     return (
-      <div className="flex flex-col h-screen bg-[#181C23] text-white">
+      <div className="flex flex-col h-screen bg-zinc-950 text-white">
         {/* Header */}
-        <header className="flex items-center justify-between px-8 py-4 bg-[#232733] border-b border-[#232733]">
+        <header className="flex items-center justify-between px-8 py-4 bg-zinc-900 border-b border-zinc-800">
           <div className="flex items-center space-x-3">
             <button
               onClick={() => handleViewChange('landing')}
@@ -754,30 +866,30 @@ export default function SupplyGenieApp() {
         </header>
         <div className="flex flex-1 min-h-0">
           {/* Sidebar */}
-          <aside className="w-[340px] bg-[#20232B] border-r border-[#232733] flex flex-col">
+          <aside className="w-[340px] bg-zinc-900 border-r border-zinc-800 flex flex-col">
             <div className="flex items-center justify-between px-6 py-5">
               <h2 className="text-lg font-semibold">My Chats</h2>
               <div className="flex items-center space-x-2">
-                <Button size="icon" className="bg-[#232733] rounded-full p-0 w-8 h-8 flex items-center justify-center text-white" onClick={createNewChat}>
+                <Button size="icon" className="bg-zinc-800 rounded-full p-0 w-8 h-8 flex items-center justify-center text-white" onClick={createNewChat}>
                   <Plus className="w-4 h-4 text-white" />
                 </Button>
               </div>
             </div>
             {/* Tabs */}
             <div className="flex items-center px-6 space-x-2 mb-3">
-              <Button size="sm" className="bg-[#232733] text-white rounded-full px-4 py-1 text-xs font-semibold">CHATS <span className="ml-2 bg-[#232733] rounded px-2">{chats.length}</span></Button>
+              <Button size="sm" className="bg-zinc-800 text-white rounded-full px-4 py-1 text-xs font-semibold">CHATS <span className="ml-2 bg-zinc-800 rounded px-2">{chats.length}</span></Button>
             </div>
             {/* Search and filter */}
             <div className="flex items-center px-6 mb-3 space-x-2">
               <div className="flex-1 relative">
                 <input
-                  className="w-full bg-[#232733] text-white rounded-lg px-3 py-2 text-sm border-none outline-none placeholder-[#7B849B]"
+                  className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm border-none outline-none placeholder-zinc-400"
                   placeholder="Search..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                 />
               </div>
-              <Button size="icon" className="bg-[#232733] rounded-lg p-0 w-8 h-8 flex items-center justify-center text-white">
+              <Button size="icon" className="bg-zinc-800 rounded-lg p-0 w-8 h-8 flex items-center justify-center text-white">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
               </Button>
             </div>
@@ -786,7 +898,7 @@ export default function SupplyGenieApp() {
               {filteredChats.map((chat) => (
                 <div
                   key={chat.id}
-                  className={`mb-2 rounded-xl px-3 py-3 cursor-pointer transition-colors ${activeChat === chat.id ? "bg-[#232733]" : "hover:bg-[#232733]/70"}`}
+                  className={`mb-2 rounded-xl px-3 py-3 cursor-pointer transition-colors ${activeChat === chat.id ? "bg-zinc-800" : "hover:bg-zinc-800/70"}`}
                   onClick={() => setActiveChat(chat.id)}
                 >
                   <div className="flex items-center justify-between">
@@ -798,7 +910,7 @@ export default function SupplyGenieApp() {
                           onChange={handleRenameChange}
                           onBlur={() => handleRenameSave(chat.id)}
                           onKeyDown={e => handleRenameKeyDown(e, chat.id)}
-                          className="font-medium text-sm truncate text-white bg-[#232733] border border-[#353A4A] rounded px-2 py-1 w-32 outline-none"
+                          className="font-medium text-sm truncate text-white bg-zinc-800 border border-zinc-700 rounded px-2 py-1 w-32 outline-none"
                           autoFocus
                           onClick={e => e.stopPropagation()}
                         />
@@ -812,7 +924,7 @@ export default function SupplyGenieApp() {
                             {chat.title}
                           </span>
                           <button
-                            className="ml-1 opacity-0 group-hover/chat-title:opacity-100 text-[#7B849B] hover:text-white transition"
+                            className="ml-1 opacity-0 group-hover/chat-title:opacity-100 text-zinc-400 hover:text-white transition"
                             onClick={e => { e.stopPropagation(); handleStartRename(chat); }}
                             tabIndex={-1}
                             title="Rename"
@@ -822,87 +934,280 @@ export default function SupplyGenieApp() {
                         </div>
                       )}
                     </div>
-                    <span className="text-xs text-[#7B849B]">{chat.messages.length} messages</span>
+                    <span className="text-xs text-zinc-400">{chat.messages.length} messages</span>
                   </div>
                 </div>
               ))}
             </div>
           </aside>
           {/* Main Chat Area */}
-          <main className="flex-1 flex flex-col bg-[#181C23]">
+          <main className="flex-1 flex flex-col bg-zinc-950">
             {/* Chat Title Bar */}
-            <div className="flex items-center justify-between px-8 py-6 border-b border-[#232733]">
+            <div className="flex items-center justify-between px-8 py-6 border-b border-zinc-800">
               <h1 className="text-xl font-semibold">{chats.find(c => c.id === activeChat)?.title || "Select a chat"}</h1>
             </div>
             {/* Messages Area */}
             <div className="flex-1 flex flex-col px-8 py-6 overflow-y-auto">
               {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center text-[#7B849B]">
+                <div className="flex flex-col items-center justify-center h-full text-center text-zinc-400">
                   No messages yet.
                 </div>
               ) : (
-                messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`mb-6 flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    {message.type !== 'user' && (
-                      <div className="flex-shrink-0 mr-3 flex items-end">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center border border-[#353A4A] shadow-md">
-                          {/* Modern AI swirl icon */}
-                          <svg className="w-7 h-7" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <defs>
-                              <linearGradient id="ai-gradient" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-                                <stop stopColor="#4ADE80" />
-                                <stop offset="1" stopColor="#60A5FA" />
-                              </linearGradient>
-                            </defs>
-                            <path d="M16 4a12 12 0 1 1-8.49 20.49" stroke="url(#ai-gradient)" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
-                            <path d="M16 28a12 12 0 1 1 8.49-20.49" stroke="url(#ai-gradient)" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
-                            <circle cx="16" cy="16" r="3.2" fill="url(#ai-gradient)" />
-                          </svg>
+                <>
+                  {messages.map((message, idx) => (
+                    <div
+                      key={`${message.id}_${message.type}_${message.timestamp?.toString() || ''}_${idx}`}
+                      className={`mb-6 flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      {message.type !== 'user' && (
+                        <div className="flex-shrink-0 mr-3 flex items-start">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center border border-zinc-700 shadow-md">
+                            {/* AI Robot Icon */}
+                            <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path 
+                                d="M12 2L13.09 8.26L22 9L13.09 9.74L12 16L10.91 9.74L2 9L10.91 8.26L12 2Z" 
+                                fill="currentColor"
+                              />
+                              <circle cx="9" cy="12" r="1" fill="currentColor"/>
+                              <circle cx="15" cy="12" r="1" fill="currentColor"/>
+                              <path 
+                                d="M8 19C8 17.5 9.5 16 12 16C14.5 16 16 17.5 16 19" 
+                                stroke="currentColor" 
+                                strokeWidth="1.5" 
+                                strokeLinecap="round"
+                                fill="none"
+                              />
+                              <rect 
+                                x="6" 
+                                y="8" 
+                                width="12" 
+                                height="8" 
+                                rx="4" 
+                                stroke="currentColor" 
+                                strokeWidth="1.5"
+                                fill="none"
+                              />
+                              <path 
+                                d="M9 8V6C9 5.5 9.5 5 10 5H14C14.5 5 15 5.5 15 6V8" 
+                                stroke="currentColor" 
+                                strokeWidth="1.5"
+                                fill="none"
+                              />
+                            </svg>
+                          </div>
                         </div>
+                      )}
+                      <div className={`flex flex-col ${message.type === 'user' ? 'items-end max-w-xl' : 'items-start max-w-full'}`}>
+                        <div
+                          className={`rounded-2xl px-5 py-4 text-base shadow-lg transition-colors duration-150 ${
+                            message.type === 'user'
+                              ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white self-end border border-blue-700 hover:shadow-blue-700/30'
+                              : 'bg-gradient-to-br from-zinc-800 to-zinc-900 text-white self-start border border-zinc-700 hover:shadow-black/20'
+                          } hover:brightness-105`}
+                        >
+                          {message.content}
+                        </div>
+                        
+                        {/* Supplier Results Section */}
+                        {message.suppliers && message.suppliers.length > 0 && (
+                          <div className="mt-4 w-full max-w-5xl">
+                            {/* Header */}
+                            <div className="flex items-center gap-3 mb-6">
+                              <div className="p-2 bg-zinc-800 rounded-lg">
+                                <Building className="w-5 h-5 text-white" />
+                              </div>
+                              <div>
+                                <h3 className="text-xl font-semibold text-white">Top Supplier Matches</h3>
+                                <p className="text-sm text-zinc-400">Found {message.suppliers.length} suppliers matching your criteria</p>
+                              </div>
+                            </div>
+                            
+                            {/* Supplier Cards Grid */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                              {message.suppliers.map((supplier) => (
+                                <Card
+                                  key={supplier.id}
+                                  className="bg-zinc-900 border-zinc-700 hover:border-zinc-600 transition-all duration-200 hover:shadow-lg"
+                                >
+                                  <CardHeader className="pb-3">
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex-1">
+                                        <CardTitle className="text-base font-semibold text-white mb-1 leading-tight">
+                                          {supplier.name}
+                                        </CardTitle>
+                                        {supplier.fields.find(f => f.label === "Location") && (
+                                          <div className="flex items-center gap-1 text-sm text-zinc-400">
+                                            <MapPin className="w-3 h-3" />
+                                            <span>{supplier.fields.find(f => f.label === "Location")?.value}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                      {supplier.fields.find(f => f.label === "Rating") && (
+                                        <div className="flex items-center gap-1 bg-zinc-800 px-2 py-1 rounded-lg">
+                                          <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" />
+                                          <span className="text-sm font-medium text-white">
+                                            {supplier.fields.find(f => f.label === "Rating")?.value}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </CardHeader>
+                                  <CardContent className="space-y-3 pt-0">
+                                    {/* Price Range */}
+                                    {supplier.fields.find(f => f.label === "Price Range") && (
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm text-zinc-400">Price Range</span>
+                                        <span className="text-sm font-medium text-green-400">
+                                          {supplier.fields.find(f => f.label === "Price Range")?.value}
+                                        </span>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Lead Time */}
+                                    {supplier.fields.find(f => f.label === "Lead Time") && (
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm text-zinc-400">Lead Time</span>
+                                        <div className="flex items-center gap-1">
+                                          <Clock className="w-3 h-3 text-zinc-400" />
+                                          <span className="text-sm text-white">
+                                            {supplier.fields.find(f => f.label === "Lead Time")?.value}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Response Time */}
+                                    {supplier.fields.find(f => f.label === "Response Time") && (
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm text-zinc-400">Response Time</span>
+                                        <span className="text-sm text-white">
+                                          {supplier.fields.find(f => f.label === "Response Time")?.value}
+                                        </span>
+                                      </div>
+                                    )}
+                                    
+                                    {/* MOQ */}
+                                    {supplier.fields.find(f => f.label === "MOQ") && (
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm text-zinc-400">MOQ</span>
+                                        <span className="text-sm text-white">
+                                          {supplier.fields.find(f => f.label === "MOQ")?.value}
+                                        </span>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Certifications */}
+                                    {supplier.fields.find(f => f.label === "Certifications") && (
+                                      <div className="space-y-2">
+                                        <span className="text-sm text-zinc-400">Supplier Certifications</span>
+                                        <div className="flex flex-wrap gap-1">
+                                          {supplier.fields.find(f => f.label === "Certifications")?.value.split(",").map((cert, idx) => (
+                                            <Badge
+                                              key={idx}
+                                              variant="secondary"
+                                              className="text-xs bg-zinc-800 text-zinc-300 border-zinc-700 px-2 py-1"
+                                            >
+                                              {cert.trim()}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Specialties */}
+                                    {supplier.fields.find(f => f.label === "Specialties") && (
+                                      <div className="space-y-2">
+                                        <span className="text-sm text-zinc-400">Specialties</span>
+                                        <div className="flex flex-wrap gap-1">
+                                          {supplier.fields.find(f => f.label === "Specialties")?.value.split(",").map((specialty, idx) => (
+                                            <Badge
+                                              key={idx}
+                                              variant="secondary"
+                                              className="text-xs bg-zinc-800 text-white border-zinc-700 px-2 py-1"
+                                            >
+                                              {specialty.trim()}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {/* Contact Details Section */}
+                                    <div className="pt-2 border-t border-zinc-700">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm text-zinc-400">Contact Details</span>
+                                        {supplier.fields.find(f => f.label === "Contact Details")?.value === "Not Provided" ? (
+                                          <span className="text-xs text-zinc-400">Not Provided</span>
+                                        ) : (
+                                          <div className="flex gap-1">
+                                            <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
+                                              <Phone className="w-3 h-3" />
+                                            </Button>
+                                            <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
+                                              <MailIcon className="w-3 h-3" />
+                                            </Button>
+                                            <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
+                                              <Globe className="w-3 h-3" />
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        <span className="mt-2 text-xs text-zinc-400 font-medium">
+                          {message.timestamp instanceof Date ? message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
                       </div>
-                    )}
-                    <div className="flex flex-col items-end max-w-xl">
-                      <div
-                        className={`rounded-2xl px-5 py-4 text-base shadow-lg transition-colors duration-150 ${
-                          message.type === 'user'
-                            ? 'bg-gradient-to-br from-blue-700 to-blue-800 text-white self-end border border-blue-900 hover:shadow-blue-900/30'
-                            : 'bg-gradient-to-br from-[#232733] to-[#313543] text-white self-start border border-[#353A4A] hover:shadow-black/20'
-                        } hover:brightness-105`}
-                      >
-                        {message.content}
-                      </div>
-                      <span className="mt-2 text-xs text-[#7B849B] font-medium">
-                        {message.timestamp instanceof Date ? message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                      </span>
+                      {message.type === 'user' && (
+                        <div className="flex-shrink-0 ml-3 flex items-end">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-base border border-zinc-700 shadow-md">
+                            {user?.name?.split(' ').map(n => n[0]).join('') || 'U'}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    {message.type === 'user' && (
-                      <div className="flex-shrink-0 ml-3 flex items-end">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-700 to-blue-900 flex items-center justify-center text-white font-bold text-base border-2 border-blue-400 shadow-md">
-                          {user?.name?.split(' ').map(n => n[0]).join('') || 'U'}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))
+                  ))}
+                  <div ref={messagesEndRef} />
+                </>
               )}
             </div>
             {/* Input Bar */}
-            <div className="px-8 py-6 border-t border-[#232733] bg-[#20232B]">
+            <div className="px-8 py-6 border-t border-zinc-800 bg-zinc-900">
               <div className="flex items-center space-x-3">
                 <input
-                  className="flex-1 h-12 bg-[#232733] border-none rounded-lg px-4 text-white placeholder-[#7B849B] outline-none"
+                  ref={inputRef}
+                  className="flex-1 h-12 bg-zinc-800 border-none rounded-lg px-4 text-white placeholder-zinc-400 outline-none"
                   placeholder="Ask questions, or type '/' for commands"
                   value={currentMessage}
                   onChange={e => setCurrentMessage(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') handleSendMessage() }}
                 />
-                <Button size="icon" className="bg-[#232733] rounded-lg p-0 w-12 h-12 flex items-center justify-center text-white" onClick={handleSendMessage}>
+                <Button
+                  size="icon"
+                  className={`bg-zinc-800 rounded-lg p-0 w-12 h-12 flex items-center justify-center text-white ${isRecording ? 'animate-pulse bg-blue-700' : ''}`}
+                  onClick={isRecording ? stopListening : startListening}
+                  type="button"
+                  title={isRecording ? "Stop recording" : "Start voice input"}
+                  disabled={!isSpeechSupported}
+                >
+                  <Mic className={`w-5 h-5 ${isRecording ? 'text-blue-400' : 'text-white'}`} />
+                </Button>
+                <Button size="icon" className="bg-zinc-800 rounded-lg p-0 w-12 h-12 flex items-center justify-center text-white" onClick={handleSendMessage}>
                   <Send className="w-5 h-5 text-white" />
                 </Button>
               </div>
+              {!isSpeechSupported && (
+                <div className="text-xs text-red-400 mt-2">Voice input is not supported in this browser.</div>
+              )}
+              {speechError && (
+                <div className="text-xs text-red-400 mt-2">{speechError}</div>
+              )}
             </div>
           </main>
         </div>
