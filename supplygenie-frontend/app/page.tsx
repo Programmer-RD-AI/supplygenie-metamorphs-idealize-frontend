@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,33 +17,66 @@ import {
   Send,
   Plus, 
   MessageSquare,
-  Menu,
-  X,
   Zap,
-  ExternalLink,
   Clock,
   MapPin,
   Star,
   ArrowRight,
   CheckCircle,
   User,
-  Settings,
   LogOut,
   Mail,
   Lock,
   Eye,
   EyeOff,
   Mic,
-  Filter,
-  ArrowUpDown,
   Phone,
   Globe,
-  Mail as MailIcon,
   Building,
 } from "lucide-react"
 import { auth } from "@/lib/firebase"
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "firebase/auth"
 import { useSpeechToText } from "@/hooks/useSpeechToText"
+
+// Reusable style constants
+const STYLE_CONSTANTS = {
+  inputBase: "bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500",
+  inputWithIcon: "h-11 pl-10",
+  inputWithPassword: "h-11 pl-10 pr-10",
+  avatarBase: "w-10 h-10 bg-zinc-800 border border-zinc-700",
+  logoContainer: "mx-auto flex items-center justify-center",
+  dropdownBase: "bg-zinc-900 border-zinc-800",
+}
+
+// Reusable components
+const UserAvatarDropdown = ({ user, onLogout }: { user: UserType; onLogout: () => void }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">
+        <Avatar className={STYLE_CONSTANTS.avatarBase}>
+          <AvatarFallback className="text-xs text-white bg-zinc-800">
+            {user.name.split(" ").map((n) => n[0]).join("") || "U"}
+          </AvatarFallback>
+        </Avatar>
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className={`w-56 ${STYLE_CONSTANTS.dropdownBase}`}>
+      <div className="px-2 py-1.5">
+        <p className="text-sm font-medium text-white">{user.name}</p>
+        <p className="text-xs text-zinc-400">{user.email}</p>
+      </div>
+      <DropdownMenuSeparator className="bg-zinc-800" />
+      <DropdownMenuItem onClick={onLogout} className="text-zinc-300 hover:text-white hover:bg-zinc-800">
+        <LogOut className="w-4 h-4 mr-2" />
+        Sign out
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
+)
+
+const LogoImage = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+  <img src="/logo.png" alt="SupplyGenie Logo" className={className} style={style} />
+)
 
 interface SupplierField {
   label: string
@@ -110,34 +142,6 @@ const mockSuppliers: Supplier[] = [
   },
   {
     id: "3",
-    name: "EcoSupply Solutions",
-    fields: [
-      { label: "Location", value: "Portland, USA", type: "location" },
-      { label: "Rating", value: "4.7", type: "rating" },
-      { label: "Price Range", value: "$5-30K", type: "price" },
-      { label: "Lead Time", value: "7-14 days", type: "time" },
-      { label: "Sustainability Score", value: "95/100", type: "text" },
-      { label: "Certifications", value: "FSC,Organic,Fair Trade", type: "badge" },
-      { label: "Materials", value: "Recycled,Biodegradable", type: "badge" },
-      { label: "Carbon Neutral", value: "Yes", type: "text" },
-    ],
-  },
-  {
-    id: "4",
-    name: "EcoSupply Solutions",
-    fields: [
-      { label: "Location", value: "Portland, USA", type: "location" },
-      { label: "Rating", value: "4.7", type: "rating" },
-      { label: "Price Range", value: "$5-30K", type: "price" },
-      { label: "Lead Time", value: "7-14 days", type: "time" },
-      { label: "Sustainability Score", value: "95/100", type: "text" },
-      { label: "Certifications", value: "FSC,Organic,Fair Trade", type: "badge" },
-      { label: "Materials", value: "Recycled,Biodegradable", type: "badge" },
-      { label: "Carbon Neutral", value: "Yes", type: "text" },
-    ],
-  },
-  {
-    id: "5",
     name: "EcoSupply Solutions",
     fields: [
       { label: "Location", value: "Portland, USA", type: "location" },
@@ -507,32 +511,11 @@ export default function SupplyGenieApp() {
         <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
             <div className="flex items-center">
-              <img src="/logo.png" alt="SupplyGenie Logo" className="h-10 w-auto" />
+              <LogoImage className="h-10 w-auto" />
             </div>
             <div className="flex items-center space-x-4">
               {user ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">
-                      <Avatar className="w-10 h-10 bg-zinc-800 border border-zinc-700">
-                        <AvatarFallback className="text-xs text-white bg-zinc-800">
-                          {user.name.split(" ").map((n) => n[0]).join("") || "U"}
-                        </AvatarFallback>
-                      </Avatar>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56 bg-zinc-900 border-zinc-800">
-                    <div className="px-2 py-1.5">
-                      <p className="text-sm font-medium text-white">{user.name}</p>
-                      <p className="text-xs text-zinc-400">{user.email}</p>
-                    </div>
-                    <DropdownMenuSeparator className="bg-zinc-800" />
-                    <DropdownMenuItem onClick={handleLogout} className="text-zinc-300 hover:text-white hover:bg-zinc-800">
-                      <LogOut className="w-4 h-4 mr-2" />
-                      Sign out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <UserAvatarDropdown user={user} onLogout={handleLogout} />
               ) : (
                 <>
                   <Button
@@ -648,8 +631,8 @@ export default function SupplyGenieApp() {
           <div className="w-full lg:w-1/2 flex justify-center">
             <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
               <CardHeader className="text-center space-y-4">
-                <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
-                   <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
+                <div className={STYLE_CONSTANTS.logoContainer} style={{ height: '48px' }}>
+                   <LogoImage style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
                 </div>
                 <div className="space-y-2">
                   <CardTitle className="text-2xl font-medium text-white">Welcome back</CardTitle>
@@ -666,7 +649,7 @@ export default function SupplyGenieApp() {
                         type="email"
                         value={loginEmail}
                         onChange={e => setLoginEmail(e.target.value)}
-                        className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                        className={`${STYLE_CONSTANTS.inputWithIcon} ${STYLE_CONSTANTS.inputBase}`}
                       />
                     </div>
                   </div>
@@ -678,7 +661,7 @@ export default function SupplyGenieApp() {
                         type={showPassword ? "text" : "password"}
                         value={loginPassword}
                         onChange={e => setLoginPassword(e.target.value)}
-                        className="h-11 pl-10 pr-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                        className={`${STYLE_CONSTANTS.inputWithPassword} ${STYLE_CONSTANTS.inputBase}`}
                       />
                       <Button
                         type="button"
@@ -731,8 +714,8 @@ export default function SupplyGenieApp() {
           <div className="w-full lg:w-1/2 flex justify-center">
             <Card className="w-full max-w-md bg-zinc-900 border-zinc-800">
               <CardHeader className="text-center space-y-4">
-                <div className="mx-auto flex items-center justify-center" style={{ height: '48px' }}>
-                   <img src="/logo.png" alt="SupplyGenie Logo" style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
+                <div className={STYLE_CONSTANTS.logoContainer} style={{ height: '48px' }}>
+                   <LogoImage style={{ height: '48px', maxWidth: '100%', width: 'auto' }} />
                 </div>
                 <div className="space-y-2">
                   <CardTitle className="text-2xl font-medium text-white">Create your account</CardTitle>
@@ -748,7 +731,7 @@ export default function SupplyGenieApp() {
                         placeholder="Full name"
                         value={signupName}
                         onChange={e => setSignupName(e.target.value)}
-                        className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                        className={`${STYLE_CONSTANTS.inputWithIcon} ${STYLE_CONSTANTS.inputBase}`}
                       />
                     </div>
                   </div>
@@ -760,7 +743,7 @@ export default function SupplyGenieApp() {
                         type="email"
                         value={signupEmail}
                         onChange={e => setSignupEmail(e.target.value)}
-                        className="h-11 pl-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                        className={`${STYLE_CONSTANTS.inputWithIcon} ${STYLE_CONSTANTS.inputBase}`}
                       />
                     </div>
                   </div>
@@ -772,7 +755,7 @@ export default function SupplyGenieApp() {
                         type={showPassword ? "text" : "password"}
                         value={signupPassword}
                         onChange={e => setSignupPassword(e.target.value)}
-                        className="h-11 pl-10 pr-10 bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+                        className={`${STYLE_CONSTANTS.inputWithPassword} ${STYLE_CONSTANTS.inputBase}`}
                       />
                       <Button
                         type="button"
@@ -834,33 +817,12 @@ export default function SupplyGenieApp() {
               aria-label="Go to home page"
               type="button"
             >
-              <img src="/logo.png" alt="SupplyGenie Logo" className="h-8 w-auto cursor-pointer" />
+              <LogoImage className="h-8 w-auto cursor-pointer" />
             </button>
           </div>
           <div className="flex items-center space-x-4">
             {user && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="text-zinc-400 hover:text-white">
-                    <Avatar className="w-10 h-10 bg-zinc-800 border border-zinc-700">
-                      <AvatarFallback className="text-xs text-white bg-zinc-800">
-                        {user.name.split(" ").map((n) => n[0]).join("") || "U"}
-                      </AvatarFallback>
-                    </Avatar>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 bg-zinc-900 border-zinc-800">
-                  <div className="px-2 py-1.5">
-                    <p className="text-sm font-medium text-white">{user.name}</p>
-                    <p className="text-xs text-zinc-400">{user.email}</p>
-                  </div>
-                  <DropdownMenuSeparator className="bg-zinc-800" />
-                  <DropdownMenuItem onClick={handleLogout} className="text-zinc-300 hover:text-white hover:bg-zinc-800">
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Sign out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <UserAvatarDropdown user={user} onLogout={handleLogout} />
             )}
           </div>
         </header>
@@ -1144,7 +1106,7 @@ export default function SupplyGenieApp() {
                                               <Phone className="w-3 h-3" />
                                             </Button>
                                             <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
-                                              <MailIcon className="w-3 h-3" />
+                                              <Mail className="w-3 h-3" />
                                             </Button>
                                             <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
                                               <Globe className="w-3 h-3" />
@@ -1216,13 +1178,4 @@ export default function SupplyGenieApp() {
   }
 
   return null
-}
-
-function formatChatTimestamp(date: Date) {
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-  if (diff < 1000 * 60 * 1) return "Now"
-  if (diff < 1000 * 60 * 60 * 24) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  if (diff < 1000 * 60 * 60 * 24 * 7) return date.toLocaleDateString([], { weekday: 'short' })
-  return date.toLocaleDateString([], { day: '2-digit', month: 'short' })
 }
