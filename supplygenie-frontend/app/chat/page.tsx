@@ -94,11 +94,7 @@ export default function Chat() {
       body: JSON.stringify({
         user_id: user.uid,
         chat_id: activeChat,
-        message: {
-          order: (chat.messages.length + 1),
-          sender: 'user',
-          message: userQuery,
-        },
+        message: userMessage,
       }),
     });
 
@@ -147,11 +143,7 @@ export default function Chat() {
         body: JSON.stringify({
           user_id: user.uid,
           chat_id: activeChat,
-          message: {
-            order: (chat.messages.length + 2),
-            sender: 'bot',
-            message: assistantMessage.content,
-          },
+          message: assistantMessage,
         }),
       });
 
@@ -280,18 +272,37 @@ export default function Chat() {
             const loadedChats = data.chats.map((chat: any) => ({
               id: chat.chat_id,
               title: chat.chat_name,
-              messages: (chat.messages || []).map((m: any) => ({
-                id: `${chat.chat_id}_${m.order}`,
-                type: m.sender === 'user' ? 'user' : (m.sender === 'bot' ? 'assistant' : m.sender),
-                content: m.message,
-                timestamp: new Date(),
-              }))
+              messages: (chat.messages || []).map((m: any) => {
+                // Handle both old format (order, sender, message) and new format (id, type, content, suppliers)
+                if (m.id && m.type && m.content !== undefined) {
+                  // New format - return as is
+                  return {
+                    id: m.id,
+                    type: m.type,
+                    content: m.content,
+                    timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+                    suppliers: m.suppliers || undefined,
+                  }
+                } else {
+                  // Old format - convert to new format
+                  return {
+                    id: `${chat.chat_id}_${m.order || Date.now()}`,
+                    type: m.sender === 'user' ? 'user' : (m.sender === 'bot' ? 'assistant' : m.sender || 'assistant'),
+                    content: m.message || m.content || '',
+                    timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+                    suppliers: undefined,
+                  }
+                }
+              })
             }))
             setChats(loadedChats)
             if (!activeChat && loadedChats.length > 0) {
               setActiveChat(loadedChats[0].id)
             }
           }
+        })
+        .catch(error => {
+          console.error('Error loading chats:', error)
         })
     }
   }, [user, activeChat])
