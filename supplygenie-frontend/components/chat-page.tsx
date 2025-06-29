@@ -130,6 +130,117 @@ const LogoImage = ({ className, style }: { className?: string; style?: React.CSS
   <img src="/logo.png" alt="SupplyGenie Logo" className={className} style={style} />
 )
 
+// Helper function to parse contact details and extract different contact types
+const parseContactDetails = (contactValue: string | null | undefined) => {
+  // Convert to string and handle null/undefined values
+  const contactStr = String(contactValue || '').trim()
+  
+  if (!contactStr || contactStr === "N/A" || contactStr === "Not Provided" || contactStr === "null" || contactStr === "undefined") {
+    return { email: null, phone: null, website: null }
+  }
+
+  // Initialize contact types
+  let email = null
+  let phone = null
+  let website = null
+
+  // Email regex pattern
+  const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g
+  const emailMatch = contactStr.match(emailRegex)
+  if (emailMatch) {
+    email = emailMatch[0]
+  }
+
+  // Phone regex pattern (various formats including international)
+  const phoneRegex = /(\+?[\d\s\-\(\)\.]{10,})/g
+  const phoneMatches = contactStr.match(phoneRegex)
+  if (phoneMatches) {
+    // Find the longest match that looks like a phone number
+    phone = phoneMatches
+      .filter(match => match.replace(/[\s\-\(\)\.]/g, '').length >= 10)
+      .reduce((longest, current) => 
+        current.replace(/[\s\-\(\)\.]/g, '').length > longest.replace(/[\s\-\(\)\.]/g, '').length ? current : longest, 
+        ''
+      ) || null
+  }
+
+  // Website regex pattern (more comprehensive)
+  const websiteRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|org|net|edu|gov|io|co|uk|de|fr|jp|cn|au|in|br|ru|ca|mx|es|it|nl|se|no|dk|fi|pl|cz|hu|gr|pt|ie|at|ch|be|lu|sk|si|bg|ro|hr|lt|lv|ee|cy|mt|is|li|mc|sm|va|ad|tr|il|ae|sa|eg|ma|tn|dz|ly|sd|gh|ng|ke|za|ug|tz|zm|zw|mw|mg|mu|sc|re|yt|km|dj|so|et|er|cf|td|cm|cg|cd|ao|na|bw|sz|ls|mz|bi|rw|sn|gm|gw|sl|lr|ci|bf|ml|ne|mr|eh)[^\s]*)/gi
+  const websiteMatch = contactStr.match(websiteRegex)
+  if (websiteMatch) {
+    website = websiteMatch[0]
+    // Add https:// if not present
+    if (!website.startsWith('http')) {
+      website = 'https://' + (website.startsWith('www.') ? website : website)
+    }
+  }
+
+  return { email, phone, website }
+}
+
+// Contact button component
+const ContactButton = ({ type, value, icon: Icon }: { 
+  type: 'email' | 'phone' | 'website', 
+  value: string, 
+  icon: any 
+}) => {
+  // Safety check for value
+  if (!value || typeof value !== 'string') {
+    return null
+  }
+
+  const getHref = () => {
+    const cleanValue = value.trim()
+    switch (type) {
+      case 'email':
+        return `mailto:${cleanValue}`
+      case 'phone':
+        return `tel:${cleanValue.replace(/[\s\-\(\)\.]/g, '')}`
+      case 'website':
+        return cleanValue
+      default:
+        return '#'
+    }
+  }
+
+  const getTitle = () => {
+    const cleanValue = value.trim()
+    switch (type) {
+      case 'email':
+        return `Send email to ${cleanValue}`
+      case 'phone':
+        return `Call ${cleanValue}`
+      case 'website':
+        return `Visit website: ${cleanValue}`
+      default:
+        return ''
+    }
+  }
+
+  const handleClick = () => {
+    try {
+      const href = getHref()
+      if (href && href !== '#') {
+        window.open(href, '_blank')
+      }
+    } catch (error) {
+      console.error('Error opening contact link:', error)
+    }
+  }
+
+  return (
+    <Button 
+      size="sm" 
+      variant="ghost" 
+      className="p-1 h-6 w-6 text-zinc-400 hover:text-white"
+      onClick={handleClick}
+      title={getTitle()}
+    >
+      <Icon className="w-3 h-3" />
+    </Button>
+  )
+}
+
 const renderFieldValue = (field: SupplierField) => {
   switch (field.type) {
     case "badge":
@@ -543,26 +654,35 @@ export default function ChatPage({
                                   )}
                                   
                                   {/* Contact Details Section */}
-                                  <div className="pt-2 border-t border-zinc-700">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <span className="text-sm text-zinc-400">Contact Details</span>
-                                      {supplier.fields.find(f => f.label === "Contact Details")?.value === "Not Provided" ? (
-                                        <span className="text-xs text-zinc-400">Not Provided</span>
-                                      ) : (
-                                        <div className="flex gap-1">
-                                          <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
-                                            <Phone className="w-3 h-3" />
-                                          </Button>
-                                          <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
-                                            <Mail className="w-3 h-3" />
-                                          </Button>
-                                          <Button size="sm" variant="ghost" className="p-1 h-6 w-6 text-zinc-400 hover:text-white">
-                                            <Globe className="w-3 h-3" />
-                                          </Button>
+                                  {(() => {
+                                    const contactField = supplier.fields.find(f => f.label === "Contact Details")
+                                    const contactValue = contactField?.value ?? "N/A"
+                                    const { email, phone, website } = parseContactDetails(contactValue)
+                                    
+                                    // Only show the contact section if at least one contact method is available
+                                    if (!email && !phone && !website) {
+                                      return null
+                                    }
+                                    
+                                    return (
+                                      <div className="pt-2 border-t border-zinc-700">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <span className="text-sm text-zinc-400">Contact Details</span>
+                                          <div className="flex gap-1">
+                                            {phone && (
+                                              <ContactButton type="phone" value={phone} icon={Phone} />
+                                            )}
+                                            {email && (
+                                              <ContactButton type="email" value={email} icon={Mail} />
+                                            )}
+                                            {website && (
+                                              <ContactButton type="website" value={website} icon={Globe} />
+                                            )}
+                                          </div>
                                         </div>
-                                      )}
-                                    </div>
-                                  </div>
+                                      </div>
+                                    )
+                                  })()}
                                 </CardContent>
                               </Card>
                             ))}
