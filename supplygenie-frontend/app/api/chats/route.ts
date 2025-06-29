@@ -2,10 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import clientPromise from "@/lib/mongodb";
 
 // Define types for better type safety
+interface SupplierField {
+  label: string;
+  value: string;
+  type: "text" | "badge" | "rating" | "price" | "location" | "time";
+}
+
+interface Supplier {
+  id: string;
+  name: string;
+  fields: SupplierField[];
+}
+
 interface ChatMessage {
-  role: string;
+  id: string;
+  type: string;
   content: string;
-  timestamp?: Date;
+  timestamp: Date;
+  suppliers?: Supplier[];
+  // Legacy fields for backward compatibility
+  role?: string;
+  message?: string;
+  order?: number;
+  sender?: string;
 }
 
 interface Chat {
