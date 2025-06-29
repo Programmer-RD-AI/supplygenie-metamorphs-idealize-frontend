@@ -21,8 +21,14 @@ interface UserChats {
 
 export async function GET(req: NextRequest) {
   try {
-    // Hardcoded user_id for debugging
-    const user_id = "Fdb7pmhFLkc2krpayhf30LF46nS2";
+    // Extract user_id from query parameters
+    const { searchParams } = new URL(req.url);
+    const user_id = searchParams.get('user_id');
+    
+    if (!user_id) {
+      return NextResponse.json({ error: 'Missing user_id parameter' }, { status: 400 });
+    }
+    
     const client = await clientPromise;
     const db = client.db("userchats");
     const userDoc = await db.collection<UserChats>("chats").findOne({ user_id });
