@@ -133,6 +133,9 @@ const LogoImage = ({ className, style }: { className?: string; style?: React.CSS
 const renderFieldValue = (field: SupplierField) => {
   switch (field.type) {
     case "badge":
+      if (field.value === "N/A") {
+        return <span className="text-sm text-zinc-400">N/A</span>
+      }
       return (
         <div className="flex flex-wrap gap-1">
           {field.value.split(",").map((item, index) => (
@@ -143,6 +146,9 @@ const renderFieldValue = (field: SupplierField) => {
         </div>
       )
     case "rating":
+      if (field.value === "N/A") {
+        return <span className="text-sm text-zinc-400">N/A</span>
+      }
       return (
         <div className="flex items-center space-x-1">
           <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" />
@@ -518,17 +524,21 @@ export default function ChatPage({
                                   {supplier.fields.find(f => f.label === "Specialties") && (
                                     <div className="space-y-2">
                                       <span className="text-sm text-zinc-400">Specialties</span>
-                                      <div className="flex flex-wrap gap-1">
-                                        {supplier.fields.find(f => f.label === "Specialties")?.value.split(",").map((specialty, idx) => (
-                                          <Badge
-                                            key={idx}
-                                            variant="secondary"
-                                            className="text-xs bg-zinc-800 text-white border-zinc-700 px-2 py-1"
-                                          >
-                                            {specialty.trim()}
-                                          </Badge>
-                                        ))}
-                                      </div>
+                                      {supplier.fields.find(f => f.label === "Specialties")?.value === "N/A" ? (
+                                        <span className="text-sm text-zinc-400">N/A</span>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-1">
+                                          {supplier.fields.find(f => f.label === "Specialties")?.value.split(",").map((specialty, idx) => (
+                                            <Badge
+                                              key={idx}
+                                              variant="secondary"
+                                              className="text-xs bg-zinc-800 text-white border-zinc-700 px-2 py-1"
+                                            >
+                                              {specialty.trim()}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                   

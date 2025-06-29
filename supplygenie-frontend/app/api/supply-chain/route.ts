@@ -13,15 +13,15 @@ interface SupplyChainRequest {
 
 interface SupplierResponse {
   company_name: string;
-  location: string;
-  rating: number;
-  price_range: string;
-  lead_time: string;
-  moq: string;
-  certifications: string[];
-  specialties: string[];
-  response_time: string;
-  contact: string;
+  location?: string;
+  rating?: number;
+  price_range?: string;
+  lead_time?: string;
+  moq?: string;
+  certifications?: string[];
+  specialties?: string[];
+  response_time?: string;
+  contact?: string;
 }
 
 interface SupplyChainResponse {
