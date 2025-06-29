@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { onAuthStateChanged, signOut } from "firebase/auth"
 import { auth } from "@/lib/firebase"
 import ChatPage from "@/components/chat-page"
+import { getSupplierRecommendations, transformSupplierData, SupplyChainApiError } from "@/lib/supply-chain-api"
 
 interface SupplierField {
   label: string
@@ -39,51 +40,6 @@ interface UserType {
   uid: string
 }
 
-const mockSuppliers: Supplier[] = [
-  {
-    id: "1",
-    name: "Global Manufacturing Co.",
-    fields: [
-      { label: "Location", value: "Shenzhen, China", type: "location" },
-      { label: "Rating", value: "4.8", type: "rating" },
-      { label: "Price Range", value: "$10-50K", type: "price" },
-      { label: "Lead Time", value: "15-30 days", type: "time" },
-      { label: "MOQ", value: "1,000 units", type: "text" },
-      { label: "Certifications", value: "ISO 9001,CE,RoHS", type: "badge" },
-      { label: "Specialties", value: "Electronics,Consumer Goods", type: "badge" },
-      { label: "Response Time", value: "2-4 hours", type: "time" },
-    ],
-  },
-  {
-    id: "2",
-    name: "Precision Parts Ltd.",
-    fields: [
-      { label: "Location", value: "Munich, Germany", type: "location" },
-      { label: "Rating", value: "4.9", type: "rating" },
-      { label: "Price Range", value: "$25-100K", type: "price" },
-      { label: "Lead Time", value: "10-20 days", type: "time" },
-      { label: "Production Capacity", value: "50K units/month", type: "text" },
-      { label: "Quality Standards", value: "Six Sigma,Lean", type: "badge" },
-      { label: "Certifications", value: "ISO 9001,ISO 14001,REACH", type: "badge" },
-      { label: "Specialties", value: "Automotive,Precision Engineering", type: "badge" },
-    ],
-  },
-  {
-    id: "3",
-    name: "EcoSupply Solutions",
-    fields: [
-      { label: "Location", value: "Portland, USA", type: "location" },
-      { label: "Rating", value: "4.7", type: "rating" },
-      { label: "Price Range", value: "$5-30K", type: "price" },
-      { label: "Lead Time", value: "7-14 days", type: "time" },
-      { label: "Sustainability Score", value: "95/100", type: "text" },
-      { label: "Certifications", value: "FSC,Organic,Fair Trade", type: "badge" },
-      { label: "Materials", value: "Recycled,Biodegradable", type: "badge" },
-      { label: "Carbon Neutral", value: "Yes", type: "text" },
-    ],
-  },
-]
-
 export default function Chat() {
   const router = useRouter()
   const [user, setUser] = useState<UserType | null>(null)
@@ -112,12 +68,15 @@ export default function Chat() {
     if (!currentMessage.trim() || !activeChat || !user) return;
     const chat = chats.find(c => c.id === activeChat);
     if (!chat) return;
+    
+    const userQuery = currentMessage;
     const userMessage = {
       id: `${activeChat}_${Date.now()}`,
       type: 'user',
       content: currentMessage,
       timestamp: new Date(),
     };
+    
     // Optimistically update UI
     setChats(prev => prev.map(chat =>
       chat.id === activeChat ? { ...chat, messages: [...chat.messages, userMessage] } : chat
@@ -138,24 +97,49 @@ export default function Chat() {
         message: {
           order: (chat.messages.length + 1),
           sender: 'user',
-          message: currentMessage,
+          message: userQuery,
         },
       }),
     });
-    // Simulate assistant response
-    setTimeout(async () => {
+
+    try {
+      // Build chat history for the API call
+      const chatHistory = chat.messages.map(msg => ({
+        role: (msg.type === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: msg.content
+      }));
+
+      // Add the current user message to chat history
+      chatHistory.push({
+        role: 'user' as const,
+        content: userQuery
+      });
+
+      // Call the supply chain API using the utility function
+      const apiData = await getSupplierRecommendations(userQuery, chatHistory);
+
       setIsAssistantTyping(false);
+      
+      // Transform API response to match our internal format
+      const transformedSuppliers: Supplier[] = apiData.suppliers?.map((supplier, index) => 
+        transformSupplierData(supplier, index)
+      ) || [];
+
       const assistantMessage = {
         id: `${activeChat}_${Date.now()}_a`,
         type: 'assistant',
-        content: "I found several electronics component suppliers in Asia with ISO certification that match your requirements. Here are the top matches:",
+        content: transformedSuppliers.length > 0 
+          ? `I found ${transformedSuppliers.length} supplier${transformedSuppliers.length > 1 ? 's' : ''} that match your requirements. Here are the top matches:`
+          : "I couldn't find any suppliers matching your specific requirements. Please try refining your search criteria.",
         timestamp: new Date(),
-        suppliers: mockSuppliers,
+        suppliers: transformedSuppliers.length > 0 ? transformedSuppliers : undefined,
       };
+
       setChats(prev => prev.map(chat =>
         chat.id === activeChat ? { ...chat, messages: [...chat.messages, assistantMessage] } : chat
       ));
       setMessages(prev => [...prev, assistantMessage]);
+
       // Save assistant message to DB
       await fetch('/api/chats', {
         method: 'PATCH',
@@ -170,7 +154,33 @@ export default function Chat() {
           },
         }),
       });
-    }, 2000);
+
+    } catch (error) {
+      setIsAssistantTyping(false);
+      console.error('Error getting supplier recommendations:', error);
+      
+      let errorMessage = "I'm sorry, I encountered an error while searching for suppliers. Please try again later.";
+      
+      if (error instanceof SupplyChainApiError) {
+        if (error.status === 400) {
+          errorMessage = "I need more information to help you find suppliers. Could you please provide more details about what you're looking for?";
+        } else if (error.status === 429) {
+          errorMessage = "I'm currently handling many requests. Please wait a moment and try again.";
+        }
+      }
+      
+      const errorMessageObj = {
+        id: `${activeChat}_${Date.now()}_error`,
+        type: 'assistant',
+        content: errorMessage,
+        timestamp: new Date(),
+      };
+
+      setChats(prev => prev.map(chat =>
+        chat.id === activeChat ? { ...chat, messages: [...chat.messages, errorMessageObj] } : chat
+      ));
+      setMessages(prev => [...prev, errorMessageObj]);
+    }
   }
 
   const createNewChat = async () => {
