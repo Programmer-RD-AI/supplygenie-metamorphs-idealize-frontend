@@ -78,6 +78,17 @@ const LogoImage = ({ className, style }: { className?: string; style?: React.CSS
   <img src="/logo.png" alt="SupplyGenie Logo" className={className} style={style} />
 )
 
+// Typing indicator component
+const TypingIndicator = () => (
+  <div className="flex items-center space-x-1 px-2 py-1">
+    <div className="flex space-x-1">
+      <div className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+      <div className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+      <div className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+    </div>
+  </div>
+)
+
 interface SupplierField {
   label: string
   value: string
@@ -195,6 +206,7 @@ export default function SupplyGenieApp() {
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState("")
+  const [isAssistantTyping, setIsAssistantTyping] = useState(false)
   const {
     isSupported: isSpeechSupported,
     isRecording,
@@ -248,6 +260,10 @@ export default function SupplyGenieApp() {
     ));
     setMessages(prev => [...prev, userMessage]);
     setCurrentMessage("");
+    
+    // Show typing indicator
+    setIsAssistantTyping(true);
+    
     // Save user message to DB
     await fetch('/api/chats', {
       method: 'PATCH',
@@ -264,6 +280,7 @@ export default function SupplyGenieApp() {
     });
     // Simulate assistant response
     setTimeout(async () => {
+      setIsAssistantTyping(false); // Hide typing indicator
       const assistantMessage = {
         id: `${activeChat}_${Date.now()}_a`,
         type: 'assistant',
@@ -289,7 +306,7 @@ export default function SupplyGenieApp() {
           },
         }),
       });
-    }, 1000);
+    }, 2000); // Increased delay to show the typing indicator better
   }
 
   const createNewChat = async () => {
@@ -497,7 +514,7 @@ export default function SupplyGenieApp() {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, activeChat]);
+  }, [messages, activeChat, isAssistantTyping]);
 
   // Landing Page
   if (currentView === "landing") {
@@ -1135,6 +1152,54 @@ export default function SupplyGenieApp() {
                       )}
                     </div>
                   ))}
+                  
+                  {/* Typing Indicator */}
+                  {isAssistantTyping && (
+                    <div className="mb-6 flex justify-start">
+                      <div className="flex-shrink-0 mr-3 flex items-start">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center border border-zinc-700 shadow-md">
+                          {/* AI Robot Icon */}
+                          <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path 
+                              d="M12 2L13.09 8.26L22 9L13.09 9.74L12 16L10.91 9.74L2 9L10.91 8.26L12 2Z" 
+                              fill="currentColor"
+                            />
+                            <circle cx="9" cy="12" r="1" fill="currentColor"/>
+                            <circle cx="15" cy="12" r="1" fill="currentColor"/>
+                            <path 
+                              d="M8 19C8 17.5 9.5 16 12 16C14.5 16 16 17.5 16 19" 
+                              stroke="currentColor" 
+                              strokeWidth="1.5" 
+                              strokeLinecap="round"
+                              fill="none"
+                            />
+                            <rect 
+                              x="6" 
+                              y="8" 
+                              width="12" 
+                              height="8" 
+                              rx="4" 
+                              stroke="currentColor" 
+                              strokeWidth="1.5"
+                              fill="none"
+                            />
+                            <path 
+                              d="M9 8V6C9 5.5 9.5 5 10 5H14C14.5 5 15 5.5 15 6V8" 
+                              stroke="currentColor" 
+                              strokeWidth="1.5"
+                              fill="none"
+                            />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-start max-w-full">
+                        <div className="rounded-2xl px-5 py-4 text-base shadow-lg transition-colors duration-150 bg-gradient-to-br from-zinc-800 to-zinc-900 text-white self-start border border-zinc-700 hover:shadow-black/20 hover:brightness-105">
+                          <TypingIndicator />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div ref={messagesEndRef} />
                 </>
               )}
